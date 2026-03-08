@@ -1,22 +1,7 @@
-# CSim
+# CSim 🚀✨
 
-A real-time 3D solar system simulation built with Python and pygame.
+A real-time 3D solar system simulation built with Python and pygame. 🌍🌕🌟
 
-```
-        .  *        .         *       .          *
-   *           .        ___        .        *
-          .       ___--   --__            .       *
-    *          _-         ##-_     .
-          . _-    *    .  ##  -_         .    *
-          -    .       . ###   -    .
-         -    .    *     ###    -         *
-        -   .          . ####   -    .
-    .  -_  .    *    .  #####  _-  *         .
-    *    --___       . ##### __--      .          *
-   .          ---_______---        *        .
-        *           .        .         *        .
-  .          *            .        .                *
-```
 
 ## Features
 
