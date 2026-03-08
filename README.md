@@ -1,11 +1,27 @@
-# CSim 🚀✨
+# ✨ CSim ✨
 
-A real-time 3D solar system simulation built with Python and pygame. 🌍🌕🌟
+A real-time 3D solar system simulation built with Python and pygame. 
+🌍🌕🌟
 
+## To Do
+- [Issue] Drawn axis and drawn longitude lines don't seem to be coaxial
+- different cameras (instead of orbital, controls xyz + yaw + roll)
+- display day and night on earth
+  - poles, where equator meets prime meridian, eventuall specific places
+- Add an earth view camera like a picture in picture
+  - start with fixed perspective of north pole looking up
+  - add toggle to south, maybe use the same locations where we display day and night
+  - eventually allow tilting of earth view
+- more user config
+  - trail fade duration
+  - earth/sun distance
+  - moon/earh distance
+  - earth radius
+  - moon radius
 
 ## Features
 
-- Circular orbits for Earth and Moon with physically-based periods
+- Circular orbit of Earth around Sun and Moon around Earth
 - Diffuse shading from the Sun with ambient light
 - Earth axial tilt (23.5°) with 8 rotating longitude lines
 - Rotation axis visualization
