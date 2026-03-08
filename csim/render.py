@@ -44,6 +44,7 @@ from csim.config import (
     SUN_GLOW_LAYERS,
     LONGITUDE_COUNT, LONGITUDE_HALF_WIDTH,
     GRID_RADII,
+    LOCATION_NAME, LOCATION_LAT_DEG, LOCATION_LON_DEG,
 )
 
 
@@ -111,7 +112,7 @@ class Renderer:
         self.trail_interval = trail_interval
         self._trails:       dict[str, deque] = {}
         self._last_record:  dict[str, float] = {}   # body name → last recorded sim.t
-        self._font          = pygame.font.SysFont("monospace", 13)
+        self._font          = self._load_font(13)
         self._sim_speed_hours = SIM_SPEED_DEFAULT_HOURS   # internal unit: hours; 24 = 1 day/s
         self._speed_timer     = 0.0
         self._coord_mode    = 0    # 0 = cartesian, 1 = cylindrical, 2 = spherical
@@ -119,6 +120,15 @@ class Renderer:
         self._frames: list  = []
 
     # ── public ────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _load_font(size: int) -> pygame.font.Font:
+        """Load DM Mono if available, fall back to system monospace."""
+        for name in ("DM Mono", "DMMono", "dm mono", "dmmono"):
+            path = pygame.font.match_font(name)
+            if path:
+                return pygame.font.Font(path, size)
+        return pygame.font.SysFont("monospace", size)
 
     def record_toggle(self) -> None:
         if not self._recording:
@@ -170,6 +180,7 @@ class Renderer:
         self._draw_hud(sim, paused)
         self._draw_coords(sim)
         self._draw_moon_phase(sim)
+        self._draw_location_panel(sim)
         if self._recording:
             raw = pygame.image.tostring(self.screen, 'RGB')
             w, h = self.screen.get_size()
@@ -443,6 +454,136 @@ class Renderer:
         for i, surf in enumerate(surfs):
             # right-align each line within the block
             self.screen.blit(surf, (x0 + max_w - surf.get_width(), y0 + i * 17))
+
+    # ── location / day-night panel ────────────────────────────────────────────
+
+    def _compute_sun_elevation(self, sim) -> float:
+        """Sun elevation in degrees at (LOCATION_LAT_DEG, LOCATION_LON_DEG) on Earth.
+
+        Builds the observer's zenith vector in world space using the Earth's
+        current tilt and rotation, then dots it with the Sun direction.
+        The formula is general: changing lat/lon in config works for any location.
+        """
+        lat = np.radians(LOCATION_LAT_DEG)
+        lon = np.radians(LOCATION_LON_DEG)
+        tilt = sim.earth.tilt
+        rot  = sim.earth.rotation
+        st, ct = np.sin(tilt), np.cos(tilt)
+        cr, sr = np.cos(rot),  np.sin(rot)
+        # Earth body-frame axes expressed in world space:
+        #   k     — north pole (tilt axis)
+        #   e1rot — equatorial direction at body lon=0, rotated with Earth
+        #   e2rot — equatorial direction at body lon=90°E, rotated with Earth
+        k     = np.array([ st,    0.0,  ct])
+        e1rot = np.array([ cr*ct, sr,  -cr*st])
+        e2rot = np.array([-sr*ct, cr,   sr*st])
+        zenith = (np.sin(lat) * k
+                  + np.cos(lat) * np.cos(lon) * e1rot
+                  + np.cos(lat) * np.sin(lon) * e2rot)
+        sun_dir = sim.sun.position - sim.earth.position
+        sun_dir = sun_dir / np.linalg.norm(sun_dir)
+        return float(np.degrees(np.arcsin(np.clip(np.dot(zenith, sun_dir), -1.0, 1.0))))
+
+    @staticmethod
+    def _sun_horizon_art(elev_deg: float) -> list:
+        """11-row ASCII cross-section: 5 sky rows, horizon, 5 ground rows.
+        Each row spans 8°, covering ±40°. Sun is a 2×2 block."""
+        STEP = 8.0
+        SKY  = 5
+        GND  = 5
+        W    = 9
+        rows = [' ' * W] * (SKY + 1 + GND)
+        rows[SKY] = '-' * W                           # horizon
+        if elev_deg >= 0:
+            r  = min(SKY - 1, int(elev_deg / STEP))
+            r1 = SKY - 1 - r                          # top row of 2×2 sun
+            rows[r1] = '  \u2726\u2726'               # ✦✦
+            if r1 + 1 < SKY:                          # second row (skip if it would hit horizon)
+                rows[r1 + 1] = '  \u2726\u2726'
+        else:
+            r  = min(GND - 1, int(-elev_deg / STEP))
+            r1 = SKY + 1 + r                          # top row of 2×2 below-horizon marker
+            rows[r1] = '  \u00b7\u00b7'               # ··
+            if r1 + 1 < SKY + 1 + GND:
+                rows[r1 + 1] = '  \u00b7\u00b7'
+        return rows
+
+    def _draw_location_panel(self, sim) -> None:
+        elev = self._compute_sun_elevation(sim)
+
+        # Status — generalises to any latitude; polar labels kick in above Arctic circle
+        polar = abs(LOCATION_LAT_DEG) >= 66.5
+        if elev > 0:
+            status = "midnight sun" if polar else "day"
+        elif elev > -6:
+            status = "civil twilight"
+        elif elev > -12:
+            status = "nautical twilight"
+        elif elev > -18:
+            status = "astronomical twilight"
+        else:
+            status = "polar night" if polar else "night"
+
+        # Sim time
+        day  = int(sim.t)
+        frac = sim.t % 1.0
+        h    = int(frac * 24)
+        m    = int((frac * 24 - h) * 60)
+
+        # Coordinate strings
+        lat, lon = LOCATION_LAT_DEG, LOCATION_LON_DEG
+        lat_str  = f"{abs(lat):.0f}\u00b0{'N' if lat >= 0 else 'S'}"
+        lon_str  = f"{abs(lon):.0f}\u00b0{'E' if lon >= 0 else 'W'}"
+
+        lines = (
+            [LOCATION_NAME,
+             f"{lat_str}  {lon_str}",
+             f"day {day:>4d}   {h:02d}:{m:02d}",
+             '']
+            + self._sun_horizon_art(elev)
+            + ['',
+               f"{elev:+.1f}\u00b0",
+               status]
+        )
+
+        # Neon palette — subtle, not blinding
+        C_HEADER   = ( 80, 220, 200)   # teal      — location name
+        C_META     = ( 70, 170, 220)   # sky blue  — coordinates, time
+        C_SUN      = (255, 215,  55)   # neon gold — ✦✦
+        C_HORIZON  = ( 55, 200, 150)   # neon mint — -----
+        C_BELOW    = (130, 100, 210)   # soft violet — ··
+        C_SKY_EMPTY= ( 30,  60, 100)   # dim blue  — empty sky rows
+        C_GND_EMPTY= ( 50,  35,  80)   # dim purple— empty ground rows
+
+        def status_color(s):
+            if s in ("day", "midnight sun"):            return (255, 210,  40)
+            if "twilight" in s:                         return (255, 130,  45)
+            return (110,  90, 210)
+
+        def line_color(line, idx, art_start, art_end):
+            if idx == 0:                    return C_HEADER
+            if idx in (1, 2):              return C_META
+            if idx >= art_start and idx < art_end:
+                if '\u2726' in line:       return C_SUN
+                if line.startswith('-'):   return C_HORIZON
+                if '\u00b7' in line:       return C_BELOW
+                # blank sky vs ground — horizon is at art_start + SKY
+                horizon_idx = art_start + 5   # SKY = 5
+                return C_SKY_EMPTY if idx < horizon_idx else C_GND_EMPTY
+            if idx == len(lines) - 1:      return status_color(status)
+            return C_META
+
+        art_start = 4           # header(3) + blank(1)
+        art_end   = art_start + 11   # 5 sky + horizon + 5 ground
+
+        sw, sh = self.screen.get_size()
+        moon_top = sh - 9 * 17 - 10
+        y0      = moon_top - 25 - len(lines) * 17
+        x_right = sw - 10
+        for i, line in enumerate(lines):
+            color = line_color(line, i, art_start, art_end)
+            surf  = self._font.render(line or ' ', True, color)
+            self.screen.blit(surf, (x_right - surf.get_width(), y0 + i * 17))
 
     def _draw_coords(self, sim) -> None:
         MODES = ["cartesian", "cylindrical", "spherical"]

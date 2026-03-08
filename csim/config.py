@@ -3,8 +3,8 @@
 # Runtime editing is not yet supported; restart the sim to apply changes.
 
 # ── Window ────────────────────────────────────────────────────────────────────
-WINDOW_WIDTH  = 900
-WINDOW_HEIGHT = 650
+WINDOW_WIDTH  = 1100
+WINDOW_HEIGHT = 700
 TARGET_FPS    = 60
 
 # ── Camera ────────────────────────────────────────────────────────────────────
@@ -59,24 +59,27 @@ DIFFUSE_GAMMA    = 0.75   # power-curve exponent: <1 brightens highlights
 # SUN_GLOW_RADIUS_MULT  : outermost ring radius as a multiple of the disc radius
 # SUN_GLOW_STEPS        : number of rings — more = smoother gradient
 # SUN_GLOW_ALPHA_MIN/MAX: alpha at the outermost / innermost ring (0–255)
+# SUN_GLOW_SPACING      : power exponent controlling ring spacing;
+#                         1.0 = even, >1 spreads outer rings farther apart
 SUN_GLOW_RADIUS_MULT = 3
 SUN_GLOW_STEPS       = 8
 SUN_GLOW_ALPHA_MIN   = 6
 SUN_GLOW_ALPHA_MAX   = 95
+SUN_GLOW_SPACING     = 2.0
 
-def _glow_layers(m: float, n: int, a_min: int, a_max: int) -> list:
-    """Generate n glow rings evenly spaced from radius_scale=m down to 1.0
-    (the disc edge). Alpha ramps quadratically from a_min at the outer edge
-    to a_max at the inner edge."""
+def _glow_layers(m: float, n: int, a_min: int, a_max: int, spacing: float) -> list:
+    """Generate n glow rings from radius_scale=m down to 1.0 (the disc edge).
+    Spacing uses a power curve so outer rings are farther apart than inner ones.
+    Alpha ramps quadratically from a_min at the outer edge to a_max at the inner."""
     return [
         (
-            round(m - i / (n - 1) * (m - 1.0), 3),
+            round(1.0 + (m - 1.0) * (1.0 - i / (n - 1)) ** spacing, 3),
             int(a_min + (a_max - a_min) * (i / (n - 1)) ** 2),
         )
         for i in range(n)
     ]
 
-SUN_GLOW_LAYERS = _glow_layers(SUN_GLOW_RADIUS_MULT, SUN_GLOW_STEPS, SUN_GLOW_ALPHA_MIN, SUN_GLOW_ALPHA_MAX)
+SUN_GLOW_LAYERS = _glow_layers(SUN_GLOW_RADIUS_MULT, SUN_GLOW_STEPS, SUN_GLOW_ALPHA_MIN, SUN_GLOW_ALPHA_MAX, SUN_GLOW_SPACING)
 
 # ── Longitude Lines ───────────────────────────────────────────────────────────
 LONGITUDE_COUNT      = 4     # number of N–S lines evenly spaced around the globe
@@ -84,3 +87,11 @@ LONGITUDE_HALF_WIDTH = 0.05  # fraction of each segment that is colored (0–0.5
 
 # ── Grid ──────────────────────────────────────────────────────────────────────
 GRID_RADII = (30, 60, 120)   # radii of the reference circles in the z=0 plane
+
+# ── Location Panel ────────────────────────────────────────────────────────────
+# Observer location on Earth. Eventually supports arbitrary lat/lon.
+# Azimuth/elevation of the view direction can be added later;
+# North Pole in that system would be (lat=90, lon=0, az=0, el=90).
+LOCATION_NAME    = "North Pole"
+LOCATION_LAT_DEG =  90.0   # degrees, +N / -S
+LOCATION_LON_DEG =   0.0   # degrees, +E / -W
