@@ -8,6 +8,13 @@ Implement your orbital mechanics inside Simulation.step().
 """
 
 import numpy as np
+from csim.config import (
+    SUN_RADIUS, EARTH_RADIUS, MOON_RADIUS,
+    COLOR_SUN, COLOR_EARTH, COLOR_MOON,
+    EARTH_ORBITAL_RADIUS, MOON_ORBITAL_RADIUS,
+    EARTH_TILT_DEG, MOON_ORBITAL_TILT_DEG,
+    EARTH_ORBITAL_PERIOD, MOON_ORBITAL_PERIOD, EARTH_ROTATION_PERIOD,
+)
 
 
 class Body:
@@ -24,31 +31,16 @@ class Simulation:
     def __init__(self):
         self.t = 0.0  # accumulated simulation time in days
 
-        # Bodies — feel free to change initial positions / radii / colors
-        self.sun   = Body(
-            "Sun",
-            [  0,  0, 0],
-            4.0,
-            (255, 220,  50)
-        )
-        self.earth = Body(
-            "Earth",
-            [ 30,  0, 0],
-            1.8,
-            ( 70, 130, 255)
-        )
-        self.moon  = Body(
-            "Moon",
-            [ 34,  0, 0],
-            0.6,
-            (200, 200, 200)
-        )
+        # Orbital radii (display units) — set in config.py
+        self.earth_r = EARTH_ORBITAL_RADIUS
+        self.moon_r  = MOON_ORBITAL_RADIUS
 
-        # Orbital radii (display units) — edit here to change orbit sizes
-        self.earth_r = np.linalg.norm(self.earth.position - self.sun.position)
-        self.moon_r  = np.linalg.norm(self.moon.position  - self.earth.position)
+        # Bodies — colors, radii, and orbital distances are all set in config.py
+        self.sun   = Body("Sun",   [0, 0, 0],                              SUN_RADIUS,   COLOR_SUN)
+        self.earth = Body("Earth", [self.earth_r, 0, 0],                   EARTH_RADIUS, COLOR_EARTH)
+        self.moon  = Body("Moon",  [self.earth_r + self.moon_r, 0, 0],     MOON_RADIUS,  COLOR_MOON)
 
-        self.earth.tilt = np.radians(23.5)   # axial tilt, fixed
+        self.earth.tilt = np.radians(EARTH_TILT_DEG)
 
         # Renderer iterates this list; order doesn't matter (depth-sorted at draw time)
         self.bodies = [self.sun, self.earth, self.moon]
@@ -68,19 +60,21 @@ class Simulation:
         self.t += dt
 
         # ── placeholder: circular orbits in the XY plane ─────────────────────
-        earth_w = 2 * np.pi / 365.25   # rad/day — one orbit per year
+        earth_w = 2 * np.pi / EARTH_ORBITAL_PERIOD   # rad/day — one orbit per year
         self.earth.position = np.array([
             self.earth_r * np.cos(self.t * earth_w),
             self.earth_r * np.sin(self.t * earth_w),
             0.0,
         ])
 
-        moon_w = 2 * np.pi / 27.32     # rad/day — one orbit per lunar month
+        moon_w    = 2 * np.pi / MOON_ORBITAL_PERIOD     # rad/day — one orbit per lunar month
+        moon_incl = np.radians(MOON_ORBITAL_TILT_DEG)
+        moon_angle = self.t * moon_w
         self.moon.position = self.earth.position + np.array([
-            self.moon_r * np.cos(self.t * moon_w),
-            self.moon_r * np.sin(self.t * moon_w),
-            0.0,
+            self.moon_r * np.cos(moon_angle),
+            self.moon_r * np.sin(moon_angle) * np.cos(moon_incl),
+            self.moon_r * np.sin(moon_angle) * np.sin(moon_incl),
         ])
 
-        self.earth.rotation += dt * (2 * np.pi / 1.0)   # one full rotation per day
+        self.earth.rotation += dt * (2 * np.pi / EARTH_ROTATION_PERIOD)   # one full rotation per day
         # ─────────────────────────────────────────────────────────────────────

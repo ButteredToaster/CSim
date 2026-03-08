@@ -4,11 +4,12 @@ import sys
 import pygame
 from csim.sim import Simulation
 from csim.render import Renderer
+from csim.config import WINDOW_WIDTH, WINDOW_HEIGHT, TARGET_FPS, TRAIL_INTERVALS, TRAIL_INTERVAL_DEFAULT
 
 
 def main():
     pygame.init()
-    screen = pygame.display.set_mode((900, 650))
+    screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
     pygame.display.set_caption("Solar System — edit sim.py to implement orbital mechanics")
     clock = pygame.time.Clock()
 
@@ -17,11 +18,10 @@ def main():
 
     paused = False
 
-    TRAIL_INTERVALS = [1/24, 0.5, 1, 7, 30]   # days: 1hr, 12hr, 1day, 1week, 1month
-    trail_idx       = 2                         # default: 1 day
+    trail_idx = TRAIL_INTERVAL_DEFAULT
 
     while True:
-        dt_real = clock.tick(60) / 1000.0   # real seconds elapsed this frame
+        dt_real = clock.tick(TARGET_FPS) / 1000.0   # real seconds elapsed this frame
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:

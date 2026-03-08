@@ -34,16 +34,27 @@ from datetime import datetime
 import numpy as np
 import pygame
 from PIL import Image
+from csim.config import (
+    CAMERA_FOV_DEG, CAMERA_DISTANCE, CAMERA_THETA_DEG, CAMERA_PHI_DEG,
+    COLOR_AXIS, COLOR_LONGITUDE, COLOR_GRID,
+    COLOR_HUD, COLOR_SPEED, COLOR_COORDS, COLOR_MOON_PHASE,
+    TRAIL_LEN, TRAIL_FADE,
+    SIM_SPEED_DEFAULT_HOURS,
+    AMBIENT, DIFFUSE, TERMINATOR_WIDTH, DIFFUSE_GAMMA,
+    SUN_GLOW_LAYERS,
+    LONGITUDE_COUNT, LONGITUDE_HALF_WIDTH,
+    GRID_RADII,
+)
 
 
 class Camera:
-    def __init__(self, width: int, height: int, fov_deg: float = 55.0):
+    def __init__(self, width: int, height: int, fov_deg: float = CAMERA_FOV_DEG):
         self.width    = width
         self.height   = height
         self.focal    = (width / 2.0) / np.tan(np.radians(fov_deg / 2.0))
-        self.theta    = np.radians(22.0)   # elevation
-        self.phi      = np.radians(0.0)    # azimuth
-        self.distance = 90.0
+        self.theta    = np.radians(CAMERA_THETA_DEG)   # elevation
+        self.phi      = np.radians(CAMERA_PHI_DEG)     # azimuth
+        self.distance = CAMERA_DISTANCE
         self.target   = np.zeros(3)
 
     @property
@@ -81,7 +92,7 @@ class Camera:
 
 
 class Renderer:
-    TRAIL_LEN    = 250
+    TRAIL_LEN    = TRAIL_LEN
     _PHASE_NAMES = [
         "New Moon",       "Waxing Crescent", "First Quarter",  "Waxing Gibbous",
         "Full Moon",      "Waning Gibbous",  "Third Quarter",  "Waning Crescent",
@@ -101,7 +112,7 @@ class Renderer:
         self._trails:       dict[str, deque] = {}
         self._last_record:  dict[str, float] = {}   # body name → last recorded sim.t
         self._font          = pygame.font.SysFont("monospace", 13)
-        self._sim_speed_hours = 24   # internal unit: hours; 24 = 1 day/s
+        self._sim_speed_hours = SIM_SPEED_DEFAULT_HOURS   # internal unit: hours; 24 = 1 day/s
         self._speed_timer     = 0.0
         self._coord_mode    = 0    # 0 = cartesian, 1 = cylindrical, 2 = spherical
         self._recording     = False
@@ -178,7 +189,7 @@ class Renderer:
             self._last_record[body.name] = sim.t
 
     def _draw_grid(self) -> None:
-        for r in (30, 60, 120):
+        for r in GRID_RADII:
             pts = []
             chunks = 144
             for i in range(chunks):
@@ -187,7 +198,7 @@ class Renderer:
                 if res:
                     pts.append((int(res[0]), int(res[1])))
             for i in range(0, len(pts)-1, 2):
-                pygame.draw.line(self.screen, (28, 28, 42), pts[i], pts[i+1], 1)
+                pygame.draw.line(self.screen, COLOR_GRID, pts[i], pts[i+1], 1)
 
     def _draw_trails(self) -> None:
         for name, trail in self._trails.items():
@@ -197,7 +208,7 @@ class Renderer:
                 if res is None:
                     continue
                 frac = i / max(n-1, 1)
-                c = tuple(int(ch * frac * 0.4) for ch in color)
+                c = tuple(int(ch * frac * TRAIL_FADE) for ch in color)
                 pygame.draw.circle(self.screen, c, (int(res[0]), int(res[1])), 1)
 
     def _draw_bodies(self, sim) -> None:
@@ -213,26 +224,30 @@ class Renderer:
                     self._draw_axis(body)
 
     def _draw_axis(self, body) -> None:
-        k    = np.array([np.sin(body.tilt), 0.0, np.cos(body.tilt)])
-        ext  = body.radius * 2.5
-        # Cap endpoints (outside sphere)
-        p_ncap = self.camera.project(body.position + k * ext)
-        p_scap = self.camera.project(body.position - k * ext)
-        # Sphere surface at each pole (where longitude lines converge)
-        p_npole = self.camera.project(body.position + k * body.radius)
-        p_spole = self.camera.project(body.position - k * body.radius)
-        color = (200, 200, 255)
-        for pole, cap in ((p_npole, p_ncap), (p_spole, p_scap)):
-            if pole and cap:
-                pygame.draw.line(self.screen, color,
-                                 (int(pole[0]), int(pole[1])),
-                                 (int(cap[0]),  int(cap[1])), 1)
+        sx, sy, sr = self.camera.project_radius(body.position, body.radius)
+        if sr is None or sr < 0.5:
+            return
+        right, up, _ = self.camera.basis()
+        k   = np.array([np.sin(body.tilt), 0.0, np.cos(body.tilt)])
+        # Use the same screen-space (orthographic) formula as the sphere shader:
+        # the pole where N_w = k appears at offset (dot(k,right)*sr, -dot(k,up)*sr)
+        # from the projected sphere centre. True perspective projection of the 3D
+        # pole diverges from this when the sphere is zoomed in or off-centre.
+        kx  = float(np.dot(k, right))
+        ky  = float(np.dot(k, up))
+        ext = 2.5   # cap extension as a multiple of the sphere radius
+        np_x = int(round(sx + kx * sr));        np_y = int(round(sy - ky * sr))
+        sp_x = int(round(sx - kx * sr));        sp_y = int(round(sy + ky * sr))
+        nc_x = int(round(sx + kx * sr * ext));  nc_y = int(round(sy - ky * sr * ext))
+        sc_x = int(round(sx - kx * sr * ext));  sc_y = int(round(sy + ky * sr * ext))
+        pygame.draw.line(self.screen, COLOR_AXIS, (np_x, np_y), (nc_x, nc_y), 1)
+        pygame.draw.line(self.screen, COLOR_AXIS, (sp_x, sp_y), (sc_x, sc_y), 1)
 
     def _draw_emissive(self, body) -> None:
         sx, sy, sr = self.camera.project_radius(body.position, body.radius)
         if sr is None or sr < 0.5:
             return
-        for scale, alpha in ((3.5, 18), (2.2, 45), (1.5, 85)):
+        for scale, alpha in SUN_GLOW_LAYERS:
             gr = int(sr * scale) + 1
             s  = pygame.Surface((gr*2+2, gr*2+2), pygame.SRCALPHA)
             pygame.draw.circle(s, (*body.color, alpha), (gr+1, gr+1), gr)
@@ -274,10 +289,10 @@ class Renderer:
         lx, ly, lz = np.dot(lv, right), np.dot(lv, up), np.dot(lv, fwd)
 
         diffuse_raw = nx*lx + ny*ly - nz*lz
-        t = np.clip((diffuse_raw + 0.12) / 0.24, 0.0, 1.0)
+        t = np.clip((diffuse_raw + TERMINATOR_WIDTH) / (2.0 * TERMINATOR_WIDTH), 0.0, 1.0)
         diffuse = t * t * (3.0 - 2.0 * t)          # smoothstep terminator
-        diffuse = diffuse ** 0.75                   # power curve for natural falloff
-        intensity = np.where(mask, 0.08 + 0.92 * diffuse, 0.0)
+        diffuse = diffuse ** DIFFUSE_GAMMA           # power curve for natural falloff
+        intensity = np.where(mask, AMBIENT + DIFFUSE * diffuse, 0.0)
 
         if getattr(body, 'rotation', 0.0) != 0.0:
             # World-space normal from camera-space components
@@ -290,20 +305,19 @@ class Renderer:
             #   e2 = [0, 1, 0]                     (world Y)
             st_t = np.sin(body.tilt);  ct_t = np.cos(body.tilt)
             lon  = np.arctan2(N_wy, N_wx*ct_t - N_wz*st_t) - body.rotation
-            # 4 longitude lines every 90°, ~3° half-width
-            lon_frac = (lon % (2*np.pi/4)) / (2*np.pi/4)
-            lon_mask = (lon_frac < 0.05) | (lon_frac > 0.95)
+            seg = 2 * np.pi / LONGITUDE_COUNT
+            lon_frac = (lon % seg) / seg
+            lon_mask = (lon_frac < LONGITUDE_HALF_WIDTH) | (lon_frac > 1.0 - LONGITUDE_HALF_WIDTH)
 
         R = np.clip(body.color[0] * intensity, 0, 255).astype(np.uint8)
         G = np.clip(body.color[1] * intensity, 0, 255).astype(np.uint8)
         B = np.clip(body.color[2] * intensity, 0, 255).astype(np.uint8)
 
         if getattr(body, 'rotation', 0.0) != 0.0:
-            JADE = (0, 180, 120)
             line_px = mask & lon_mask
-            R = np.where(line_px, np.clip(JADE[0] * intensity, 0, 255), R).astype(np.uint8)
-            G = np.where(line_px, np.clip(JADE[1] * intensity, 0, 255), G).astype(np.uint8)
-            B = np.where(line_px, np.clip(JADE[2] * intensity, 0, 255), B).astype(np.uint8)
+            R = np.where(line_px, np.clip(COLOR_LONGITUDE[0] * intensity, 0, 255), R).astype(np.uint8)
+            G = np.where(line_px, np.clip(COLOR_LONGITUDE[1] * intensity, 0, 255), G).astype(np.uint8)
+            B = np.where(line_px, np.clip(COLOR_LONGITUDE[2] * intensity, 0, 255), B).astype(np.uint8)
         A = np.where(mask, 255, 0).astype(np.uint8)
 
         # surfarray is (width, height) → transpose from (ph,pw)
@@ -330,7 +344,7 @@ class Renderer:
             "r             : record gif",
         ]
         for i, txt in enumerate(lines):
-            self.screen.blit(self._font.render(txt, True, (110, 110, 135)), (10, 10 + i*17))
+            self.screen.blit(self._font.render(txt, True, COLOR_HUD), (10, 10 + i*17))
 
         # Top-right: speed, zoom, trail interval
         if self._sim_speed_hours < 24:
@@ -342,9 +356,9 @@ class Renderer:
         zoom_txt  = f"zoom: {self.camera.distance:.0f}"
         trail_txt = f"trail: {self._format_interval(self.trail_interval)}"
         top_right = [
-            (speed_txt, (180, 180, 100)),
-            (zoom_txt,  (180, 180, 100)),
-            (trail_txt, (110, 110, 135)),
+            (speed_txt, COLOR_SPEED),
+            (zoom_txt,  COLOR_SPEED),
+            (trail_txt, COLOR_HUD),
         ]
         if self._recording:
             top_right.insert(0, ("● REC", (220, 50, 50)))
@@ -419,8 +433,7 @@ class Renderer:
         bar   = self._phase_bar(frac)
 
         lines = art + ['', name, cycle, bar]
-        color = (180, 180, 160)
-        surfs = [self._font.render(l if l else ' ', True, color) for l in lines]
+        surfs = [self._font.render(l if l else ' ', True, COLOR_MOON_PHASE) for l in lines]
 
         max_w  = max(s.get_width() for s in surfs)
         sw, sh = self.screen.get_size()
@@ -460,5 +473,5 @@ class Renderer:
 
         sh = self.screen.get_height()
         for i, txt in enumerate(reversed(lines)):
-            surf = self._font.render(txt, True, (110, 150, 110))
+            surf = self._font.render(txt, True, COLOR_COORDS)
             self.screen.blit(surf, (10, sh - 10 - (i + 1) * 17))
