@@ -30,8 +30,10 @@ sense of depth and scale.
 
 from __future__ import annotations
 from collections import deque
+from datetime import datetime
 import numpy as np
 import pygame
+from PIL import Image
 
 
 class Camera:
@@ -102,8 +104,24 @@ class Renderer:
         self._sim_speed_hours = 24   # internal unit: hours; 24 = 1 day/s
         self._speed_timer     = 0.0
         self._coord_mode    = 0    # 0 = cartesian, 1 = cylindrical, 2 = spherical
+        self._recording     = False
+        self._frames: list  = []
 
     # ── public ────────────────────────────────────────────────────────────────
+
+    def record_toggle(self) -> None:
+        if not self._recording:
+            self._recording = True
+            self._frames = []
+        else:
+            self._recording = False
+            if self._frames:
+                fname = datetime.now().strftime("recording_%Y%m%d_%H%M%S.gif")
+                first = self._frames[0]
+                first.save(fname, save_all=True, append_images=self._frames[1:],
+                           loop=0, duration=33)
+                print(f"GIF saved: {fname}")
+            self._frames = []
 
     @property
     def sim_speed(self) -> float:
@@ -141,6 +159,10 @@ class Renderer:
         self._draw_hud(sim, paused)
         self._draw_coords(sim)
         self._draw_moon_phase(sim)
+        if self._recording:
+            raw = pygame.image.tostring(self.screen, 'RGB')
+            w, h = self.screen.get_size()
+            self._frames.append(Image.frombytes('RGB', (w, h), raw))
 
     # ── private ───────────────────────────────────────────────────────────────
 
@@ -251,8 +273,11 @@ class Renderer:
         lv = lv / max(np.linalg.norm(lv), 1e-9)
         lx, ly, lz = np.dot(lv, right), np.dot(lv, up), np.dot(lv, fwd)
 
-        diffuse   = np.clip(nx*lx + ny*ly - nz*lz, 0.0, 1.0)
-        intensity = np.where(mask, 0.12 + 0.88*diffuse, 0.0)
+        diffuse_raw = nx*lx + ny*ly - nz*lz
+        t = np.clip((diffuse_raw + 0.12) / 0.24, 0.0, 1.0)
+        diffuse = t * t * (3.0 - 2.0 * t)          # smoothstep terminator
+        diffuse = diffuse ** 0.75                   # power curve for natural falloff
+        intensity = np.where(mask, 0.08 + 0.92 * diffuse, 0.0)
 
         if getattr(body, 'rotation', 0.0) != 0.0:
             # World-space normal from camera-space components
@@ -265,14 +290,20 @@ class Renderer:
             #   e2 = [0, 1, 0]                     (world Y)
             st_t = np.sin(body.tilt);  ct_t = np.cos(body.tilt)
             lon  = np.arctan2(N_wy, N_wx*ct_t - N_wz*st_t) - body.rotation
-            # 8 longitude lines, ~3° half-width
-            lon_frac = (lon % (2*np.pi/8)) / (2*np.pi/8)
+            # 4 longitude lines every 90°, ~3° half-width
+            lon_frac = (lon % (2*np.pi/4)) / (2*np.pi/4)
             lon_mask = (lon_frac < 0.05) | (lon_frac > 0.95)
-            intensity = np.where(mask & lon_mask, intensity * 0.35, intensity)
 
         R = np.clip(body.color[0] * intensity, 0, 255).astype(np.uint8)
         G = np.clip(body.color[1] * intensity, 0, 255).astype(np.uint8)
         B = np.clip(body.color[2] * intensity, 0, 255).astype(np.uint8)
+
+        if getattr(body, 'rotation', 0.0) != 0.0:
+            JADE = (0, 180, 120)
+            line_px = mask & lon_mask
+            R = np.where(line_px, np.clip(JADE[0] * intensity, 0, 255), R).astype(np.uint8)
+            G = np.where(line_px, np.clip(JADE[1] * intensity, 0, 255), G).astype(np.uint8)
+            B = np.where(line_px, np.clip(JADE[2] * intensity, 0, 255), B).astype(np.uint8)
         A = np.where(mask, 255, 0).astype(np.uint8)
 
         # surfarray is (width, height) → transpose from (ph,pw)
@@ -296,6 +327,7 @@ class Renderer:
             ",  /  .       : -1 / +1 day per second",
             "[  /  ]       : trail interval",
             "c             : cycle coordinates",
+            "r             : record gif",
         ]
         for i, txt in enumerate(lines):
             self.screen.blit(self._font.render(txt, True, (110, 110, 135)), (10, 10 + i*17))
@@ -309,11 +341,14 @@ class Renderer:
             speed_txt = f"{d} {'day' if d == 1 else 'days'}/s"
         zoom_txt  = f"zoom: {self.camera.distance:.0f}"
         trail_txt = f"trail: {self._format_interval(self.trail_interval)}"
-        for i, (txt, color) in enumerate([
+        top_right = [
             (speed_txt, (180, 180, 100)),
             (zoom_txt,  (180, 180, 100)),
             (trail_txt, (110, 110, 135)),
-        ]):
+        ]
+        if self._recording:
+            top_right.insert(0, ("● REC", (220, 50, 50)))
+        for i, (txt, color) in enumerate(top_right):
             surf = self._font.render(txt, True, color)
             self.screen.blit(surf, (self.screen.get_width() - surf.get_width() - 10, 10 + i*17))
 

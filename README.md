@@ -1,7 +1,9 @@
 # ✨ CSim ✨
 
-A real-time 3D solar system simulation built with Python and pygame. 
+A real-time 3D solar system simulation built with Python and pygame.
 🌍🌕🌟
+
+![CSim demo](recording_20260308_010004.gif)
 
 ## To Do
 - [Issue] Drawn axis and drawn longitude lines don't seem to be coaxial
@@ -23,7 +25,7 @@ A real-time 3D solar system simulation built with Python and pygame.
 
 - Circular orbit of Earth around Sun and Moon around Earth
 - Diffuse shading from the Sun with ambient light
-- Earth axial tilt (23.5°) with 8 rotating longitude lines
+- Earth axial tilt (23.5°) with 4 jade green rotating longitude lines
 - Rotation axis visualization
 - Fading orbital trail history
 - Moon phase tracker with ASCII art and phase name
@@ -42,6 +44,7 @@ A real-time 3D solar system simulation built with Python and pygame.
 | `,` / `.` | Decrease / increase sim speed |
 | `[` / `]` | Trail interval shorter / longer |
 | `C` | Cycle coordinate display mode |
+| `R` | Start / stop GIF recording |
 
 ## Setup
 

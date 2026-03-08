@@ -37,6 +37,8 @@ def main():
                     trail_idx = min(len(TRAIL_INTERVALS) - 1, trail_idx + 1)
                 if event.key == pygame.K_c:
                     renderer.cycle_coord_mode()
+                elif event.key == pygame.K_r:
+                    renderer.record_toggle()
 
         renderer.trail_interval = TRAIL_INTERVALS[trail_idx]
 
