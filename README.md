@@ -3,7 +3,7 @@
 A real-time 3D solar system simulation built with Python and pygame.
 🌍🌕🌟
 
-![CSim demo](recording_20260308_010004recording_00_01_00.gif)
+![CSim demo](recording_00_01_00.gif)
 ## Features
 
 - Circular orbit of Earth around Sun and Moon around Earth
