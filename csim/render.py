@@ -37,7 +37,6 @@ from PIL import Image
 from csim.config import (
     CAMERA_FOV_DEG, CAMERA_DISTANCE, CAMERA_THETA_DEG, CAMERA_PHI_DEG,
     COLOR_AXIS, COLOR_LONGITUDE, COLOR_GRID,
-    COLOR_HUD, COLOR_SPEED, COLOR_COORDS, COLOR_MOON_PHASE,
     TRAIL_LEN, TRAIL_FADE,
     SIM_SPEED_DEFAULT_HOURS,
     AMBIENT, DIFFUSE, TERMINATOR_WIDTH, DIFFUSE_GAMMA,
@@ -46,6 +45,16 @@ from csim.config import (
     GRID_RADII,
     LOCATION_NAME, LOCATION_LAT_DEG, LOCATION_LON_DEG,
 )
+
+# ── Neon palette (shared across all HUD panels) ────────────────────────────
+_NC_TEAL   = ( 80, 220, 200)   # headers / location name
+_NC_SKY    = ( 70, 170, 220)   # metadata / values
+_NC_GOLD   = (255, 215,  55)   # active / lit / speed
+_NC_MINT   = ( 55, 200, 150)   # keys / body names / horizon
+_NC_VIOLET = (130, 100, 210)   # below-horizon / night
+_NC_ORANGE = (255, 140,  45)   # paused / twilight / half-steps
+_NC_DIM_B  = ( 30,  60, 100)   # dim sky / inactive / descriptions
+_NC_DIM_P  = ( 50,  35,  80)   # dim ground / dark moon / dashes
 
 
 class Camera:
@@ -129,6 +138,17 @@ class Renderer:
             if path:
                 return pygame.font.Font(path, size)
         return pygame.font.SysFont("monospace", size)
+
+    def _csurf(self, s: str, color_fn) -> pygame.Surface:
+        """Render s char-by-char; color_fn(ch) → RGB. Spaces are transparent."""
+        cw = self._font.size('x')[0]   # monospace: all chars same width
+        ch = self._font.get_height()
+        surf = pygame.Surface((max(cw * len(s), 1), ch), pygame.SRCALPHA)
+        for i, c in enumerate(s):
+            if c == ' ':
+                continue
+            surf.blit(self._font.render(c, True, color_fn(c)), (i * cw, 0))
+        return surf
 
     def record_toggle(self) -> None:
         if not self._recording:
@@ -342,10 +362,12 @@ class Renderer:
         self.screen.blit(surf, (x0, y0))
 
     def _draw_hud(self, sim, paused: bool) -> None:
-        # Top-left: sim time + controls
+        # ── top-left: status + controls ───────────────────────────────────────
         status = "PAUSED" if paused else f"day {sim.t:.1f}"
-        lines = [
-            status,
+        sc = _NC_ORANGE if paused else _NC_GOLD
+        self.screen.blit(self._font.render(status, True, sc), (10, 10))
+
+        ctrl_lines = [
             "WASD / arrows : orbit camera",
             "+  /  -       : zoom",
             "Space         : pause / resume",
@@ -354,10 +376,15 @@ class Renderer:
             "c             : cycle coordinates",
             "r             : record gif",
         ]
-        for i, txt in enumerate(lines):
-            self.screen.blit(self._font.render(txt, True, COLOR_HUD), (10, 10 + i*17))
+        for i, txt in enumerate(ctrl_lines):
+            y = 10 + (i + 1) * 17
+            idx = txt.index(':')
+            ks = self._font.render(txt[:idx], True, _NC_MINT)
+            ds = self._font.render(txt[idx:], True, _NC_DIM_B)
+            self.screen.blit(ks, (10, y))
+            self.screen.blit(ds, (10 + ks.get_width(), y))
 
-        # Top-right: speed, zoom, trail interval
+        # ── top-right: speed / zoom / trail ───────────────────────────────────
         if self._sim_speed_hours < 24:
             h = self._sim_speed_hours
             speed_txt = f"{h} {'hr' if h == 1 else 'hrs'}/s"
@@ -367,9 +394,9 @@ class Renderer:
         zoom_txt  = f"zoom: {self.camera.distance:.0f}"
         trail_txt = f"trail: {self._format_interval(self.trail_interval)}"
         top_right = [
-            (speed_txt, COLOR_SPEED),
-            (zoom_txt,  COLOR_SPEED),
-            (trail_txt, COLOR_HUD),
+            (speed_txt, _NC_GOLD),
+            (zoom_txt,  _NC_SKY),
+            (trail_txt, _NC_MINT),
         ]
         if self._recording:
             top_right.insert(0, ("● REC", (220, 50, 50)))
@@ -443,16 +470,32 @@ class Renderer:
         cycle = '  '.join('*' if i == idx else 'o' for i in range(8))
         bar   = self._phase_bar(frac)
 
-        lines = art + ['', name, cycle, bar]
-        surfs = [self._font.render(l if l else ' ', True, COLOR_MOON_PHASE) for l in lines]
+        def art_color(ch):
+            return _NC_GOLD if ch == '#' else _NC_DIM_P
+
+        def cycle_color(ch):
+            return _NC_GOLD if ch == '*' else _NC_DIM_B
+
+        def bar_color(ch):
+            if ch == '|': return _NC_GOLD
+            if ch == '>': return _NC_ORANGE
+            if ch in '[]': return _NC_DIM_B
+            return _NC_DIM_P   # '-'
+
+        surfs = (
+            [self._csurf(row, art_color) for row in art]
+            + [self._font.render(' ', True, _NC_DIM_B)]        # blank spacer
+            + [self._font.render(name, True, _NC_TEAL)]
+            + [self._csurf(cycle, cycle_color)]
+            + [self._csurf(bar, bar_color)]
+        )
 
         max_w  = max(s.get_width() for s in surfs)
         sw, sh = self.screen.get_size()
         x0     = sw - max_w - 10
-        y0     = sh - len(lines) * 17 - 10
+        y0     = sh - len(surfs) * 17 - 10
 
         for i, surf in enumerate(surfs):
-            # right-align each line within the block
             self.screen.blit(surf, (x0 + max_w - surf.get_width(), y0 + i * 17))
 
     # ── location / day-night panel ────────────────────────────────────────────
@@ -546,19 +589,18 @@ class Renderer:
                status]
         )
 
-        # Neon palette — subtle, not blinding
-        C_HEADER   = ( 80, 220, 200)   # teal      — location name
-        C_META     = ( 70, 170, 220)   # sky blue  — coordinates, time
-        C_SUN      = (255, 215,  55)   # neon gold — ✦✦
-        C_HORIZON  = ( 55, 200, 150)   # neon mint — -----
-        C_BELOW    = (130, 100, 210)   # soft violet — ··
-        C_SKY_EMPTY= ( 30,  60, 100)   # dim blue  — empty sky rows
-        C_GND_EMPTY= ( 50,  35,  80)   # dim purple— empty ground rows
+        C_HEADER    = _NC_TEAL
+        C_META      = _NC_SKY
+        C_SUN       = _NC_GOLD
+        C_HORIZON   = _NC_MINT
+        C_BELOW     = _NC_VIOLET
+        C_SKY_EMPTY = _NC_DIM_B
+        C_GND_EMPTY = _NC_DIM_P
 
         def status_color(s):
-            if s in ("day", "midnight sun"):            return (255, 210,  40)
-            if "twilight" in s:                         return (255, 130,  45)
-            return (110,  90, 210)
+            if s in ("day", "midnight sun"):   return _NC_GOLD
+            if "twilight" in s:                return _NC_ORANGE
+            return _NC_VIOLET
 
         def line_color(line, idx, art_start, art_end):
             if idx == 0:                    return C_HEADER
@@ -614,5 +656,22 @@ class Renderer:
 
         sh = self.screen.get_height()
         for i, txt in enumerate(reversed(lines)):
-            surf = self._font.render(txt, True, COLOR_COORDS)
-            self.screen.blit(surf, (10, sh - 10 - (i + 1) * 17))
+            y = sh - 10 - (i + 1) * 17
+            if not txt:
+                continue
+            if txt.startswith("coords"):
+                sep = txt.index(':')
+                hs = self._font.render(txt[:sep], True, _NC_TEAL)
+                ms = self._font.render(txt[sep:], True, _NC_SKY)
+                self.screen.blit(hs, (10, y))
+                self.screen.blit(ms, (10 + hs.get_width(), y))
+            elif txt.isupper():
+                self.screen.blit(self._font.render(txt, True, _NC_MINT), (10, y))
+            elif '=' in txt:
+                sep = txt.index('=')
+                ls = self._font.render(txt[:sep + 1], True, _NC_DIM_B)
+                vs = self._font.render(txt[sep + 1:], True, _NC_SKY)
+                self.screen.blit(ls, (10, y))
+                self.screen.blit(vs, (10 + ls.get_width(), y))
+            else:
+                self.screen.blit(self._font.render(txt, True, _NC_DIM_B), (10, y))
